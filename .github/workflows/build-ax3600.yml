@@ -1,4 +1,4 @@
-name: Build FanchmWrt for Xiaomi AX3600 (Big Partition 240MB)
+name: Build FanchmWrt for Xiaomi AX3600 (Real Big Partition 240MB)
 
 on:
   workflow_dispatch:
@@ -50,11 +50,13 @@ jobs:
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    - name: 注入小米 AX3600 大分区专属补丁与配置 (diy-part2.sh)
+    - name: 注入小米 AX3600 大分区专属补丁与配置 (锁定48MB大分区)
       run: |
         chmod +x $DIY_P2_SH
         ./$DIY_P2_SH
         cp $CONFIG_FILE .config
+        make defconfig
+        cat $CONFIG_FILE >> .config
         make defconfig
 
     - name: 预下载依赖软件包缓存 (Download dl)
@@ -85,14 +87,14 @@ jobs:
       uses: actions/upload-artifact@v4
       if: steps.organize.outputs.status == 'success' && !cancelled()
       with:
-        name: FanchmWrt_AX3600_BigPartition_${{ github.run_id }}
+        name: FanchmWrt_AX3600_RealBigPart_${{ github.run_id }}
         path: ${{ env.FIRMWARE }}
 
-    - name: 发布大分区专属固件到 GitHub Releases
+    - name: 发布真正的大分区专属固件到 GitHub Releases
       uses: softprops/action-gh-release@v2
       if: steps.organize.outputs.status == 'success' && !cancelled()
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: AX3600-BigPart-${{ github.run_number }}
+        tag_name: AX3600-RealBigPart-${{ github.run_number }}
         files: ${{ env.FIRMWARE }}/*
