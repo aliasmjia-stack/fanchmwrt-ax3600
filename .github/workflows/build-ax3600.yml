@@ -1,4 +1,4 @@
-name: Build FanchmWrt for Xiaomi AX3600 (Real Big Partition 240MB)
+name: Build FanchmWrt 25.12.6 Latest for Xiaomi AX3600 (Real Big Partition 240MB)
 
 on:
   workflow_dispatch:
@@ -7,6 +7,8 @@ permissions:
   contents: write
 
 env:
+  REPO_URL: https://github.com/fanchmwrt/fanchmwrt
+  REPO_BRANCH: fanchmwrt-25.12.6
   CONFIG_FILE: fanchmwrt_ax3600_ci/ax3600_bigpart.config
   DIY_P1_SH: fanchmwrt_ax3600_ci/diy-part1.sh
   DIY_P2_SH: fanchmwrt_ax3600_ci/diy-part2.sh
@@ -19,10 +21,10 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    - name: 检出当前仓库源码
+    - name: 检出当前仓库
       uses: actions/checkout@v4
 
-    - name: 初始化编译环境与磁盘清理
+    - name: 初始化编译依赖环境与系统深度清理
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
@@ -39,28 +41,43 @@ jobs:
         sudo -E apt-get -qq autoremove --purge
         sudo -E apt-get -qq clean
         sudo timedatectl set-timezone "$TZ"
+        sudo mkdir -p /workdir
+        sudo chown $USER:$GROUPS /workdir
 
-    - name: 加载自定义 Feed 源 (diy-part1.sh)
+    - name: 克隆 FanchmWrt 官方最新 25.12.6 源码
+      working-directory: /workdir
+      run: |
+        df -h
+        git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
+        ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
+
+    - name: 加载自定义 Feed 源配置 (diy-part1.sh)
       run: |
         chmod +x $DIY_P1_SH
-        ./$DIY_P1_SH
+        cd openwrt
+        $GITHUB_WORKSPACE/$DIY_P1_SH
 
     - name: 更新与安装 Feeds 扩展包
       run: |
+        cd openwrt
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    - name: 注入小米 AX3600 大分区专属补丁与配置 (锁定48MB大分区)
+    - name: 注入小米 AX3600 大分区专属补丁与配置 (锁定48MB/360块大分区)
       run: |
         chmod +x $DIY_P2_SH
-        ./$DIY_P2_SH
-        cp $CONFIG_FILE .config
+        cd openwrt
+        $GITHUB_WORKSPACE/$DIY_P2_SH
+        cp $GITHUB_WORKSPACE/$CONFIG_FILE .config
         make defconfig
-        cat $CONFIG_FILE >> .config
+        cat $GITHUB_WORKSPACE/$CONFIG_FILE >> .config
         make defconfig
+        echo "=== 检查最终生成的关键配置项 ==="
+        grep -E 'ROOTFS_PARTSIZE|CONFIG_PACKAGE_luci=|CONFIG_PACKAGE_kmod-qca-nss' .config
 
     - name: 预下载依赖软件包缓存 (Download dl)
       run: |
+        cd openwrt
         make download -j8
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
@@ -68,6 +85,7 @@ jobs:
     - name: 开始多核心全速编译
       id: compile
       run: |
+        cd openwrt
         echo -e "$(nproc) 核心全速编译中..."
         make -j$(nproc) || make -j1 V=s
         echo "status=success" >> $GITHUB_OUTPUT
@@ -76,7 +94,7 @@ jobs:
       id: organize
       if: steps.compile.outputs.status == 'success' && !cancelled()
       run: |
-        cd bin/targets/*/*
+        cd openwrt/bin/targets/*/*
         rm -rf packages
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
         echo "status=success" >> $GITHUB_OUTPUT
@@ -87,14 +105,14 @@ jobs:
       uses: actions/upload-artifact@v4
       if: steps.organize.outputs.status == 'success' && !cancelled()
       with:
-        name: FanchmWrt_AX3600_RealBigPart_${{ github.run_id }}
+        name: FanchmWrt_25.12.6_AX3600_BigPart_${{ github.run_id }}
         path: ${{ env.FIRMWARE }}
 
-    - name: 发布真正的大分区专属固件到 GitHub Releases
+    - name: 发布最新版 25.12.6 大分区专属固件到 GitHub Releases
       uses: softprops/action-gh-release@v2
       if: steps.organize.outputs.status == 'success' && !cancelled()
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: AX3600-RealBigPart-${{ github.run_number }}
+        tag_name: FanchmWrt-25.12.6-AX3600-BigPart-${{ github.run_number }}
         files: ${{ env.FIRMWARE }}/*
